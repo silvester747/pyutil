@@ -35,7 +35,6 @@ import logging
 log = logging.getLogger('CallTracing')
 
 # TODO: Show defaults too
-# TODO: Handle subclasses of traced classes
 # TODO: Handle properties (maybe use class_attrs for everything?)
 
 
@@ -59,6 +58,11 @@ def _trace_class(c):
     class_attrs = inspect.classify_class_attrs(c)
     methods = inspect.getmembers(c, lambda obj: inspect.ismethod(obj) or inspect.isfunction(obj))
     for name, method in methods:
+
+        if hasattr(method, 'tracer'):
+            # Method is already being traced
+            continue
+
         for attr_name, attr_kind, _, _ in class_attrs:
             if attr_name == name:
                 kind = attr_kind
@@ -478,3 +482,51 @@ class _TestCallTraceDecorator(unittest.TestCase):
         expected = [self._mock.call.debug('_TestClass.test_method(cls={}, a=1, b=2, c=3)'.format(str(_TestClass))),
                     self._mock.call.debug('_TestClass.test_method returned 40')]
         self.assertListEqual(log.mock_calls, expected)
+
+    def test_sub_class(self):
+        @trace
+        class _BaseClass(object):
+            def method_one(self, a, b):
+                return a+b
+
+            def method_two(self, c, d):
+                return c+d
+
+        @trace
+        class _SubClass(_BaseClass):
+            def method_two(self, c, d):
+                return c-d
+
+            def method_three(self, e, f):
+                return e+f
+
+        bc = _BaseClass()
+        sc = _SubClass()
+
+        ret = bc.method_one(1, 2)
+        self.assertEqual(ret, 3)
+
+        ret = bc.method_two(4, 5)
+        self.assertEqual(ret, 9)
+
+        ret = sc.method_one(1, 2)
+        self.assertEqual(ret, 3)
+
+        ret = sc.method_two(4, 5)
+        self.assertEqual(ret, -1)
+
+        ret = sc.method_three(3, 1)
+        self.assertEqual(ret, 4)
+
+        expected = [self._mock.call.debug('_BaseClass[{}].method_one(self={}, a=1, b=2)'.format(id(bc), str(bc))),
+                    self._mock.call.debug('_BaseClass[{}].method_one returned 3'.format(id(bc))),
+                    self._mock.call.debug('_BaseClass[{}].method_two(self={}, c=4, d=5)'.format(id(bc), str(bc))),
+                    self._mock.call.debug('_BaseClass[{}].method_two returned 9'.format(id(bc))),
+                    self._mock.call.debug('_BaseClass[{}].method_one(self={}, a=1, b=2)'.format(id(sc), str(sc))),
+                    self._mock.call.debug('_BaseClass[{}].method_one returned 3'.format(id(sc))),
+                    self._mock.call.debug('_SubClass[{}].method_two(self={}, c=4, d=5)'.format(id(sc), str(sc))),
+                    self._mock.call.debug('_SubClass[{}].method_two returned -1'.format(id(sc))),
+                    self._mock.call.debug('_SubClass[{}].method_three(self={}, e=3, f=1)'.format(id(sc), str(sc))),
+                    self._mock.call.debug('_SubClass[{}].method_three returned 4'.format(id(sc)))]
+        self.assertListEqual(log.mock_calls, expected)
+
