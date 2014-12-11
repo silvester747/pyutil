@@ -134,8 +134,7 @@ class _FunctionTracer(object):
         self._func = func
         self._get_details()
 
-        # Static/class methods do not have the class associated, so allow overriding after trying
-        # to retrieve from function object
+        # Static/class methods do not have the class associated, so allow passing a fallback
         if class_name and not self._class_name:
             self._class_name = class_name
 
