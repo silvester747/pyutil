@@ -36,6 +36,7 @@ log = logging.getLogger('CallTracing')
 
 # TODO: Show defaults too
 # TODO: Handle properties (maybe use class_attrs for everything?)
+# TODO: Improve tracing subclasses: use setattr on the proper class objects
 
 
 def trace(obj):
