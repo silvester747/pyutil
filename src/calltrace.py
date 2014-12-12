@@ -29,11 +29,7 @@ __author__ = 'Silvester747@gmail.com'
 
 import inspect
 import threading
-import traceback
 import unittest
-
-import logging
-log = logging.getLogger('CallTracing')
 
 # TODO: Show defaults too
 # TODO: Handle properties (maybe use class_attrs for everything?)
@@ -43,7 +39,7 @@ log = logging.getLogger('CallTracing')
 def trace(obj):
     """
     Trace all calls to a function, method or all methods in a class. Simply annotate any of them
-    with @trace. Uses Python logging at DEBUG level with name 'CallTracing'.
+    with @trace. Prints traces to stdout.
 
     Tries do prepare as much as possible at the time of class definition and limit the cycles wasted
     during each traced call.
@@ -122,6 +118,10 @@ def _check_recursion_loop():
     :return: True if we are looping.
     """
     return id(threading.current_thread()) in _threads_in_safe_str
+
+
+def _output(msg):
+    print('CallTracing:', msg)
 
 
 class _FunctionTracer(object):
@@ -233,7 +233,7 @@ class _FunctionTracer(object):
             raise
 
     def _log_call(self, pargs, kwargs, instance):
-        log.debug(self._format_call(pargs, kwargs, instance))
+        _output(self._format_call(pargs, kwargs, instance))
 
     def _format_call(self, pargs, kwargs, instance):
         formatted_pargs = self._format_arguments(zip(self._arg_names, pargs))
@@ -253,11 +253,12 @@ class _FunctionTracer(object):
             return ''
 
     def _log_return(self, return_value, instance):
-        log.debug(self._return_format.format(instance_id=instance,
-                                             return_value=return_value))
+        _output(self._return_format.format(instance_id=instance,
+                                           return_value=return_value))
 
     def _log_exception(self, instance):
-        log.exception(self._exception_format.format(instance_id=instance))
+        # TODO: Fix output of exception trace
+        _output(self._exception_format.format(instance_id=instance))
 
 
 class _TestCallTraceDecorator(unittest.TestCase):
@@ -268,18 +269,18 @@ class _TestCallTraceDecorator(unittest.TestCase):
         import mock
         self._mock = mock
 
-        self._original_log = None
+        self._original_output = None
 
         self.maxDiff = None
 
     def setUp(self):
-        global log
-        self._original_log = log
-        log = self._mock.MagicMock()
+        global _output
+        self._original_output = _output
+        _output = self._mock.MagicMock()
 
     def tearDown(self):
-        global log
-        log = self._original_log
+        global _output
+        _output = self._original_output
 
     def test_function_decorating(self):
         @trace
@@ -289,9 +290,9 @@ class _TestCallTraceDecorator(unittest.TestCase):
         ret = _test_func(1, 2, c=3)
         self.assertEqual(ret, 40)
 
-        expected = [self._mock.call.debug('_test_func(a=1, b=2, c=3)'),
-                    self._mock.call.debug('_test_func returned 40')]
-        self.assertListEqual(log.mock_calls, expected)
+        expected = [self._mock.call('_test_func(a=1, b=2, c=3)'),
+                    self._mock.call('_test_func returned 40')]
+        self.assertListEqual(_output.mock_calls, expected)
 
     def test_method_decorating_old_style_class(self):
         class _TestClass:
@@ -303,9 +304,9 @@ class _TestCallTraceDecorator(unittest.TestCase):
         ret = tc.test_method(1, 2, c=3)
         self.assertEqual(ret, 40)
 
-        expected = [self._mock.call.debug('[{}].test_method(self={}, a=1, b=2, c=3)'.format(id(tc), str(tc))),
-                    self._mock.call.debug('[{}].test_method returned 40'.format(id(tc)))]
-        self.assertListEqual(log.mock_calls, expected)
+        expected = [self._mock.call('[{}].test_method(self={}, a=1, b=2, c=3)'.format(id(tc), str(tc))),
+                    self._mock.call('[{}].test_method returned 40'.format(id(tc)))]
+        self.assertListEqual(_output.mock_calls, expected)
 
     def test_method_decorating_new_style_class(self):
         class _TestClass(object):
@@ -317,9 +318,9 @@ class _TestCallTraceDecorator(unittest.TestCase):
         ret = tc.test_method(1, 2, c=3)
         self.assertEqual(ret, 40)
 
-        expected = [self._mock.call.debug('[{}].test_method(self={}, a=1, b=2, c=3)'.format(id(tc), str(tc))),
-                    self._mock.call.debug('[{}].test_method returned 40'.format(id(tc)))]
-        self.assertListEqual(log.mock_calls, expected)
+        expected = [self._mock.call('[{}].test_method(self={}, a=1, b=2, c=3)'.format(id(tc), str(tc))),
+                    self._mock.call('[{}].test_method returned 40'.format(id(tc)))]
+        self.assertListEqual(_output.mock_calls, expected)
 
     def test_class_decorating_old_style(self):
         @trace
@@ -338,11 +339,11 @@ class _TestCallTraceDecorator(unittest.TestCase):
         ret = tc.test_method2(5, 6)
         self.assertEqual(ret, 11)
 
-        expected = [self._mock.call.debug('_TestClass[{}].test_method(self={}, a=2, b=3, c=4)'.format(id(tc), str(tc))),
-                    self._mock.call.debug('_TestClass[{}].test_method returned 43'.format(id(tc))),
-                    self._mock.call.debug('_TestClass[{}].test_method2(self={}, e=5, f=6)'.format(id(tc), str(tc))),
-                    self._mock.call.debug('_TestClass[{}].test_method2 returned 11'.format(id(tc)))]
-        self.assertListEqual(log.mock_calls, expected)
+        expected = [self._mock.call('_TestClass[{}].test_method(self={}, a=2, b=3, c=4)'.format(id(tc), str(tc))),
+                    self._mock.call('_TestClass[{}].test_method returned 43'.format(id(tc))),
+                    self._mock.call('_TestClass[{}].test_method2(self={}, e=5, f=6)'.format(id(tc), str(tc))),
+                    self._mock.call('_TestClass[{}].test_method2 returned 11'.format(id(tc)))]
+        self.assertListEqual(_output.mock_calls, expected)
 
     def test_class_decorating_new_style(self):
         @trace
@@ -361,11 +362,11 @@ class _TestCallTraceDecorator(unittest.TestCase):
         ret = tc.test_method2(5, 6)
         self.assertEqual(ret, 11)
 
-        expected = [self._mock.call.debug('_TestClass[{}].test_method(self={}, a=2, b=3, c=4)'.format(id(tc), str(tc))),
-                    self._mock.call.debug('_TestClass[{}].test_method returned 43'.format(id(tc))),
-                    self._mock.call.debug('_TestClass[{}].test_method2(self={}, e=5, f=6)'.format(id(tc), str(tc))),
-                    self._mock.call.debug('_TestClass[{}].test_method2 returned 11'.format(id(tc)))]
-        self.assertListEqual(log.mock_calls, expected)
+        expected = [self._mock.call('_TestClass[{}].test_method(self={}, a=2, b=3, c=4)'.format(id(tc), str(tc))),
+                    self._mock.call('_TestClass[{}].test_method returned 43'.format(id(tc))),
+                    self._mock.call('_TestClass[{}].test_method2(self={}, e=5, f=6)'.format(id(tc), str(tc))),
+                    self._mock.call('_TestClass[{}].test_method2 returned 11'.format(id(tc)))]
+        self.assertListEqual(_output.mock_calls, expected)
 
     def test_prevent_recursion_str(self):
         """
@@ -390,14 +391,14 @@ class _TestCallTraceDecorator(unittest.TestCase):
         ret = tc.method()
         self.assertEqual(ret, 'Return')
 
-        expected = [self._mock.call.debug('_TestClass[{}].__str__(self=My Name)'.format(id(tc))),
-                    self._mock.call.debug('_TestClass[{}].my_name(self=My Name)'.format(id(tc))),
-                    self._mock.call.debug('_TestClass[{}].my_name returned My Name'.format(id(tc))),
-                    self._mock.call.debug('_TestClass[{}].__str__ returned My Name'.format(id(tc))),
+        expected = [self._mock.call('_TestClass[{}].__str__(self=My Name)'.format(id(tc))),
+                    self._mock.call('_TestClass[{}].my_name(self=My Name)'.format(id(tc))),
+                    self._mock.call('_TestClass[{}].my_name returned My Name'.format(id(tc))),
+                    self._mock.call('_TestClass[{}].__str__ returned My Name'.format(id(tc))),
                     # Here __str__ and calls from it are suppressed
-                    self._mock.call.debug('_TestClass[{}].method(self=My Name)'.format(id(tc))),
-                    self._mock.call.debug('_TestClass[{}].method returned Return'.format(id(tc)))]
-        self.assertListEqual(log.mock_calls, expected)
+                    self._mock.call('_TestClass[{}].method(self=My Name)'.format(id(tc))),
+                    self._mock.call('_TestClass[{}].method returned Return'.format(id(tc)))]
+        self.assertListEqual(_output.mock_calls, expected)
 
     def test_init_prevent_access_to_members(self):
         """
@@ -413,9 +414,9 @@ class _TestCallTraceDecorator(unittest.TestCase):
                 return self._a
 
         tc = _TestClass('bla')
-        expected = [self._mock.call.debug('_TestClass[{}].__init__(a=bla)'.format(id(tc))),
-                    self._mock.call.debug('_TestClass[{}].__init__ returned None'.format(id(tc)))]
-        self.assertListEqual(log.mock_calls, expected)
+        expected = [self._mock.call('_TestClass[{}].__init__(a=bla)'.format(id(tc))),
+                    self._mock.call('_TestClass[{}].__init__ returned None'.format(id(tc)))]
+        self.assertListEqual(_output.mock_calls, expected)
 
     def test_method_raises_exception(self):
         @trace
@@ -427,9 +428,9 @@ class _TestCallTraceDecorator(unittest.TestCase):
         with self.assertRaises(TypeError):
             tc.boom()
 
-        expected = [self._mock.call.debug('_TestClass[{}].boom(self={})'.format(id(tc), str(tc))),
+        expected = [self._mock.call('_TestClass[{}].boom(self={})'.format(id(tc), str(tc))),
                     self._mock.call.exception('_TestClass[{}].boom raised an exception'.format(id(tc)))]
-        self.assertListEqual(log.mock_calls, expected)
+        self.assertListEqual(_output.mock_calls, expected)
 
     def test_masquerade(self):
         @trace
@@ -460,9 +461,9 @@ class _TestCallTraceDecorator(unittest.TestCase):
         ret = _TestClass.test_method(1, 2, c=3)
         self.assertEqual(ret, 40)
 
-        expected = [self._mock.call.debug('_TestClass.test_method(a=1, b=2, c=3)'),
-                    self._mock.call.debug('_TestClass.test_method returned 40')]
-        self.assertListEqual(log.mock_calls, expected)
+        expected = [self._mock.call('_TestClass.test_method(a=1, b=2, c=3)'),
+                    self._mock.call('_TestClass.test_method returned 40')]
+        self.assertListEqual(_output.mock_calls, expected)
 
     def test_class_method(self):
         @trace
@@ -474,9 +475,9 @@ class _TestCallTraceDecorator(unittest.TestCase):
         ret = _TestClass.test_method(1, 2, c=3)
         self.assertEqual(ret, 40)
 
-        expected = [self._mock.call.debug('_TestClass.test_method(cls={}, a=1, b=2, c=3)'.format(str(_TestClass))),
-                    self._mock.call.debug('_TestClass.test_method returned 40')]
-        self.assertListEqual(log.mock_calls, expected)
+        expected = [self._mock.call('_TestClass.test_method(cls={}, a=1, b=2, c=3)'.format(str(_TestClass))),
+                    self._mock.call('_TestClass.test_method returned 40')]
+        self.assertListEqual(_output.mock_calls, expected)
 
     def test_sub_class(self):
         @trace
@@ -513,35 +514,21 @@ class _TestCallTraceDecorator(unittest.TestCase):
         ret = sc.method_three(3, 1)
         self.assertEqual(ret, 4)
 
-        expected = [self._mock.call.debug('_BaseClass[{}].method_one(self={}, a=1, b=2)'.format(id(bc), str(bc))),
-                    self._mock.call.debug('_BaseClass[{}].method_one returned 3'.format(id(bc))),
-                    self._mock.call.debug('_BaseClass[{}].method_two(self={}, c=4, d=5)'.format(id(bc), str(bc))),
-                    self._mock.call.debug('_BaseClass[{}].method_two returned 9'.format(id(bc))),
-                    self._mock.call.debug('_BaseClass[{}].method_one(self={}, a=1, b=2)'.format(id(sc), str(sc))),
-                    self._mock.call.debug('_BaseClass[{}].method_one returned 3'.format(id(sc))),
-                    self._mock.call.debug('_SubClass[{}].method_two(self={}, c=4, d=5)'.format(id(sc), str(sc))),
-                    self._mock.call.debug('_SubClass[{}].method_two returned -1'.format(id(sc))),
-                    self._mock.call.debug('_SubClass[{}].method_three(self={}, e=3, f=1)'.format(id(sc), str(sc))),
-                    self._mock.call.debug('_SubClass[{}].method_three returned 4'.format(id(sc)))]
-        self.assertListEqual(log.mock_calls, expected)
+        expected = [self._mock.call('_BaseClass[{}].method_one(self={}, a=1, b=2)'.format(id(bc), str(bc))),
+                    self._mock.call('_BaseClass[{}].method_one returned 3'.format(id(bc))),
+                    self._mock.call('_BaseClass[{}].method_two(self={}, c=4, d=5)'.format(id(bc), str(bc))),
+                    self._mock.call('_BaseClass[{}].method_two returned 9'.format(id(bc))),
+                    self._mock.call('_BaseClass[{}].method_one(self={}, a=1, b=2)'.format(id(sc), str(sc))),
+                    self._mock.call('_BaseClass[{}].method_one returned 3'.format(id(sc))),
+                    self._mock.call('_SubClass[{}].method_two(self={}, c=4, d=5)'.format(id(sc), str(sc))),
+                    self._mock.call('_SubClass[{}].method_two returned -1'.format(id(sc))),
+                    self._mock.call('_SubClass[{}].method_three(self={}, e=3, f=1)'.format(id(sc), str(sc))),
+                    self._mock.call('_SubClass[{}].method_three returned 4'.format(id(sc)))]
+        self.assertListEqual(_output.mock_calls, expected)
 
 
 class _TestTraceOverhead(unittest.TestCase):
     number_of_cycles = 10000
-
-    def setUp(self):
-        import os
-        import tempfile
-
-        self._log_dir = tempfile.mkdtemp()
-        self._log_file = os.path.join(self._log_dir, 'test.log')
-        logging.basicConfig(level=logging.DEBUG, filename=self._log_file)
-
-    def tearDown(self):
-        import shutil
-
-        logging.shutdown()
-        shutil.rmtree(self._log_dir)
 
     def test_overhead_no_arguments_no_return(self):
         def _test_function():
