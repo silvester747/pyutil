@@ -28,6 +28,7 @@ from __future__ import print_function
 __author__ = 'Silvester747@gmail.com'
 
 import inspect
+import threading
 import traceback
 import unittest
 
@@ -92,24 +93,23 @@ def _trace_method(func, class_name=None):
     return _FunctionTracer(func, class_name).wrapped_function()
 
 
+_threads_in_safe_str = set()
+
+
 def _safe_str(obj):
     """
     Get string representations for objects without causing recursions in traced objects. Goes
     together with _check_recursion_loop().
     """
+    current_thread = id(threading.current_thread())
     try:
+        _threads_in_safe_str.add(current_thread)
         return str(obj)
     except RuntimeError:
         # Infinite recursion should no longer happen, but let's be safe
         return str(id(obj))
-
-
-# Stack traces contain .py files, but __file__ can be .pyc too. Make sure the
-# right file is expected
-if __file__.endswith('.pyc'):
-    _my_source_file = __file__[:-1]
-else:
-    _my_source_file = __file__
+    finally:
+        _threads_in_safe_str.remove(current_thread)
 
 
 def _check_recursion_loop():
@@ -121,12 +121,7 @@ def _check_recursion_loop():
 
     :return: True if we are looping.
     """
-    stack = traceback.extract_stack()
-    me = [name
-          for filename, _, name, _
-          in stack
-          if name == _safe_str.__name__ and filename == _my_source_file]
-    return len(me) > 0
+    return id(threading.current_thread()) in _threads_in_safe_str
 
 
 class _FunctionTracer(object):
