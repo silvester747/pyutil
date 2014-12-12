@@ -530,3 +530,48 @@ class _TestCallTraceDecorator(unittest.TestCase):
                     self._mock.call.debug('_SubClass[{}].method_three returned 4'.format(id(sc)))]
         self.assertListEqual(log.mock_calls, expected)
 
+
+class _TestTraceOverhead(unittest.TestCase):
+    number_of_cycles = 10000
+
+    def setUp(self):
+        import os
+        import tempfile
+
+        self._log_dir = tempfile.mkdtemp()
+        self._log_file = os.path.join(self._log_dir, 'test.log')
+        logging.basicConfig(level=logging.DEBUG, filename=self._log_file)
+
+    def tearDown(self):
+        import shutil
+
+        logging.shutdown()
+        shutil.rmtree(self._log_dir)
+
+    def test_overhead_no_arguments_no_return(self):
+        def _test_function():
+            # Some small function with 10 statements
+            for _ in range(10):
+                pass
+
+        import timeit
+        no_trace = timeit.timeit(stmt=_test_function, number=self.number_of_cycles)
+        with_trace = timeit.timeit(stmt=trace(_test_function), number=self.number_of_cycles)
+
+        print('no trace: ', no_trace)
+        print('with trace: ', with_trace)
+        print('overhead: ', with_trace*100/no_trace)
+
+    def test_profile_no_arguments_no_return(self):
+        def _test_function():
+            # Some small function with 10 statements
+            for _ in range(10):
+                pass
+
+        import cProfile
+        import timeit
+        pr = cProfile.Profile()
+        pr.enable()
+        timeit.timeit(stmt=trace(_test_function), number=self.number_of_cycles)
+        pr.create_stats()
+        pr.print_stats()
