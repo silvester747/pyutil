@@ -34,6 +34,7 @@ import unittest
 # TODO: Show defaults too
 # TODO: Handle properties (maybe use class_attrs for everything?)
 # TODO: Improve tracing subclasses: use setattr on the proper class objects
+# TODO: Add id of thread
 
 
 def trace(obj):
