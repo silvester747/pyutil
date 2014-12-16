@@ -29,6 +29,7 @@ __author__ = 'Silvester747@gmail.com'
 
 import inspect
 import threading
+import traceback
 import unittest
 
 # TODO: Show defaults too
@@ -258,8 +259,8 @@ class _FunctionTracer(object):
                                            return_value=return_value))
 
     def _log_exception(self, instance):
-        # TODO: Fix output of exception trace
         _output(self._exception_format.format(instance_id=instance))
+        _output(traceback.format_exc())
 
 
 class _TestCallTraceDecorator(unittest.TestCase):
@@ -430,7 +431,8 @@ class _TestCallTraceDecorator(unittest.TestCase):
             tc.boom()
 
         expected = [self._mock.call('_TestClass[{}].boom(self={})'.format(id(tc), str(tc))),
-                    self._mock.call.exception('_TestClass[{}].boom raised an exception'.format(id(tc)))]
+                    self._mock.call.exception('_TestClass[{}].boom raised an exception'.format(id(tc))),
+                    self._mock.call('Traceback (most recent call last):\n  File "/home/rob/python/pyutil/src/calltrace.py", line 229, in _call\n    ret = self._func(*pargs, **kwargs)\n  File "/home/rob/python/pyutil/src/calltrace.py", line 427, in boom\n    raise TypeError(\'badaboom\')\nTypeError: badaboom\n')]
         self.assertListEqual(_output.mock_calls, expected)
 
     def test_masquerade(self):
