@@ -35,7 +35,6 @@ import unittest
 # TODO: Show defaults too
 # TODO: Handle properties (maybe use class_attrs for everything?)
 # TODO: Improve tracing subclasses: use setattr on the proper class objects
-# TODO: Add id of thread
 
 
 def trace(obj):
@@ -167,10 +166,11 @@ class _FunctionTracer(object):
         self._name_format = self._name_format.format(class_name=self._class_name,
                                                      func_name=self._name,
                                                      instance_id='{instance_id}')
+        thread_format = 'Thread{{{thread}}}:'
 
-        self._call_format = self._name_format + '({pargs}{comma}{kwargs})'
-        self._return_format = self._name_format + ' returned {return_value}'
-        self._exception_format = self._name_format + ' raised an exception'
+        self._call_format = thread_format + self._name_format + '({pargs}{comma}{kwargs})'
+        self._return_format = thread_format + self._name_format + ' returned {return_value}'
+        self._exception_format = thread_format + self._name_format + ' raised an exception'
 
     def _select_handle_self(self):
         if self._has_self and self._is_init:
@@ -224,25 +224,27 @@ class _FunctionTracer(object):
         instance = 0  # in case exception is raised in a loop
         if not looping:
             filtered_pargs, filtered_kwargs, instance = self._handle_self(pargs, kwargs)
-            self._log_call(filtered_pargs, filtered_kwargs, instance)
+            thread_id = id(threading.current_thread())
+            self._log_call(filtered_pargs, filtered_kwargs, instance, thread_id)
         try:
             ret = self._func(*pargs, **kwargs)
             if not looping:
-                self._log_return(ret, instance)
+                self._log_return(ret, instance, thread_id)
             return ret
         except:
-            self._log_exception(instance)
+            self._log_exception(instance, thread_id)
             raise
 
-    def _log_call(self, pargs, kwargs, instance):
-        _output(self._format_call(pargs, kwargs, instance))
+    def _log_call(self, pargs, kwargs, instance, thread_id):
+        _output(self._format_call(pargs, kwargs, instance, thread_id))
 
-    def _format_call(self, pargs, kwargs, instance):
+    def _format_call(self, pargs, kwargs, instance, thread_id):
         formatted_pargs = self._format_arguments(zip(self._arg_names, pargs))
         formatted_kwargs = self._format_arguments(kwargs.items())
         comma = ', ' if formatted_pargs and formatted_kwargs else ''
 
-        return self._call_format.format(instance_id=instance,
+        return self._call_format.format(thread=thread_id,
+                                        instance_id=instance,
                                         pargs=formatted_pargs,
                                         kwargs=formatted_kwargs,
                                         comma=comma)
@@ -254,12 +256,14 @@ class _FunctionTracer(object):
         else:
             return ''
 
-    def _log_return(self, return_value, instance):
-        _output(self._return_format.format(instance_id=instance,
+    def _log_return(self, return_value, instance, thread_id):
+        _output(self._return_format.format(thread=thread_id,
+                                           instance_id=instance,
                                            return_value=return_value))
 
-    def _log_exception(self, instance):
-        _output(self._exception_format.format(instance_id=instance))
+    def _log_exception(self, instance, thread_id):
+        _output(self._exception_format.format(thread=thread_id,
+                                              instance_id=instance))
         _output(traceback.format_exc())
 
 
@@ -292,8 +296,9 @@ class _TestCallTraceDecorator(unittest.TestCase):
         ret = _test_func(1, 2, c=3)
         self.assertEqual(ret, 40)
 
-        expected = [self._mock.call('_test_func(a=1, b=2, c=3)'),
-                    self._mock.call('_test_func returned 40')]
+        thread_id = id(threading.current_thread())
+        expected = [self._mock.call('Thread{{{}}}:_test_func(a=1, b=2, c=3)'.format(thread_id)),
+                    self._mock.call('Thread{{{}}}:_test_func returned 40'.format(thread_id))]
         self.assertListEqual(_output.mock_calls, expected)
 
     def test_method_decorating_old_style_class(self):
@@ -306,8 +311,11 @@ class _TestCallTraceDecorator(unittest.TestCase):
         ret = tc.test_method(1, 2, c=3)
         self.assertEqual(ret, 40)
 
-        expected = [self._mock.call('[{}].test_method(self={}, a=1, b=2, c=3)'.format(id(tc), str(tc))),
-                    self._mock.call('[{}].test_method returned 40'.format(id(tc)))]
+        thread_id = id(threading.current_thread())
+        expected = [self._mock.call('Thread{{{}}}:[{}].test_method(self={}, a=1, b=2, c=3)'
+                                    .format(thread_id, id(tc), str(tc))),
+                    self._mock.call('Thread{{{}}}:[{}].test_method returned 40'
+                                    .format(thread_id, id(tc)))]
         self.assertListEqual(_output.mock_calls, expected)
 
     def test_method_decorating_new_style_class(self):
@@ -320,8 +328,11 @@ class _TestCallTraceDecorator(unittest.TestCase):
         ret = tc.test_method(1, 2, c=3)
         self.assertEqual(ret, 40)
 
-        expected = [self._mock.call('[{}].test_method(self={}, a=1, b=2, c=3)'.format(id(tc), str(tc))),
-                    self._mock.call('[{}].test_method returned 40'.format(id(tc)))]
+        thread_id = id(threading.current_thread())
+        expected = [self._mock.call('Thread{{{}}}:[{}].test_method(self={}, a=1, b=2, c=3)'
+                                    .format(thread_id, id(tc), str(tc))),
+                    self._mock.call('Thread{{{}}}:[{}].test_method returned 40'
+                                    .format(thread_id, id(tc)))]
         self.assertListEqual(_output.mock_calls, expected)
 
     def test_class_decorating_old_style(self):
@@ -341,10 +352,15 @@ class _TestCallTraceDecorator(unittest.TestCase):
         ret = tc.test_method2(5, 6)
         self.assertEqual(ret, 11)
 
-        expected = [self._mock.call('_TestClass[{}].test_method(self={}, a=2, b=3, c=4)'.format(id(tc), str(tc))),
-                    self._mock.call('_TestClass[{}].test_method returned 43'.format(id(tc))),
-                    self._mock.call('_TestClass[{}].test_method2(self={}, e=5, f=6)'.format(id(tc), str(tc))),
-                    self._mock.call('_TestClass[{}].test_method2 returned 11'.format(id(tc)))]
+        thread_id = id(threading.current_thread())
+        expected = [self._mock.call('Thread{{{}}}:_TestClass[{}].test_method(self={}, a=2, b=3, c=4)'
+                                    .format(thread_id, id(tc), str(tc))),
+                    self._mock.call('Thread{{{}}}:_TestClass[{}].test_method returned 43'
+                                    .format(thread_id, id(tc))),
+                    self._mock.call('Thread{{{}}}:_TestClass[{}].test_method2(self={}, e=5, f=6)'
+                                    .format(thread_id, id(tc), str(tc))),
+                    self._mock.call('Thread{{{}}}:_TestClass[{}].test_method2 returned 11'
+                                    .format(thread_id, id(tc)))]
         self.assertListEqual(_output.mock_calls, expected)
 
     def test_class_decorating_new_style(self):
@@ -364,10 +380,15 @@ class _TestCallTraceDecorator(unittest.TestCase):
         ret = tc.test_method2(5, 6)
         self.assertEqual(ret, 11)
 
-        expected = [self._mock.call('_TestClass[{}].test_method(self={}, a=2, b=3, c=4)'.format(id(tc), str(tc))),
-                    self._mock.call('_TestClass[{}].test_method returned 43'.format(id(tc))),
-                    self._mock.call('_TestClass[{}].test_method2(self={}, e=5, f=6)'.format(id(tc), str(tc))),
-                    self._mock.call('_TestClass[{}].test_method2 returned 11'.format(id(tc)))]
+        thread_id = id(threading.current_thread())
+        expected = [self._mock.call('Thread{{{}}}:_TestClass[{}].test_method(self={}, a=2, b=3, c=4)'
+                                    .format(thread_id, id(tc), str(tc))),
+                    self._mock.call('Thread{{{}}}:_TestClass[{}].test_method returned 43'
+                                    .format(thread_id, id(tc))),
+                    self._mock.call('Thread{{{}}}:_TestClass[{}].test_method2(self={}, e=5, f=6)'
+                                    .format(thread_id, id(tc), str(tc))),
+                    self._mock.call('Thread{{{}}}:_TestClass[{}].test_method2 returned 11'
+                                    .format(thread_id, id(tc)))]
         self.assertListEqual(_output.mock_calls, expected)
 
     def test_prevent_recursion_str(self):
@@ -393,13 +414,20 @@ class _TestCallTraceDecorator(unittest.TestCase):
         ret = tc.method()
         self.assertEqual(ret, 'Return')
 
-        expected = [self._mock.call('_TestClass[{}].__str__(self=My Name)'.format(id(tc))),
-                    self._mock.call('_TestClass[{}].my_name(self=My Name)'.format(id(tc))),
-                    self._mock.call('_TestClass[{}].my_name returned My Name'.format(id(tc))),
-                    self._mock.call('_TestClass[{}].__str__ returned My Name'.format(id(tc))),
+        thread_id = id(threading.current_thread())
+        expected = [self._mock.call('Thread{{{}}}:_TestClass[{}].__str__(self=My Name)'
+                                    .format(thread_id, id(tc))),
+                    self._mock.call('Thread{{{}}}:_TestClass[{}].my_name(self=My Name)'
+                                    .format(thread_id, id(tc))),
+                    self._mock.call('Thread{{{}}}:_TestClass[{}].my_name returned My Name'
+                                    .format(thread_id, id(tc))),
+                    self._mock.call('Thread{{{}}}:_TestClass[{}].__str__ returned My Name'
+                                    .format(thread_id, id(tc))),
                     # Here __str__ and calls from it are suppressed
-                    self._mock.call('_TestClass[{}].method(self=My Name)'.format(id(tc))),
-                    self._mock.call('_TestClass[{}].method returned Return'.format(id(tc)))]
+                    self._mock.call('Thread{{{}}}:_TestClass[{}].method(self=My Name)'
+                                    .format(thread_id, id(tc))),
+                    self._mock.call('Thread{{{}}}:_TestClass[{}].method returned Return'
+                                    .format(thread_id, id(tc)))]
         self.assertListEqual(_output.mock_calls, expected)
 
     def test_init_prevent_access_to_members(self):
@@ -416,8 +444,11 @@ class _TestCallTraceDecorator(unittest.TestCase):
                 return self._a
 
         tc = _TestClass('bla')
-        expected = [self._mock.call('_TestClass[{}].__init__(a=bla)'.format(id(tc))),
-                    self._mock.call('_TestClass[{}].__init__ returned None'.format(id(tc)))]
+        thread_id = id(threading.current_thread())
+        expected = [self._mock.call('Thread{{{}}}:_TestClass[{}].__init__(a=bla)'
+                                    .format(thread_id, id(tc))),
+                    self._mock.call('Thread{{{}}}:_TestClass[{}].__init__ returned None'
+                                    .format(thread_id, id(tc)))]
         self.assertListEqual(_output.mock_calls, expected)
 
     def test_method_raises_exception(self):
@@ -430,9 +461,13 @@ class _TestCallTraceDecorator(unittest.TestCase):
         with self.assertRaises(TypeError):
             tc.boom()
 
-        expected = [self._mock.call('_TestClass[{}].boom(self={})'.format(id(tc), str(tc))),
-                    self._mock.call.exception('_TestClass[{}].boom raised an exception'.format(id(tc))),
-                    self._mock.call('Traceback (most recent call last):\n  File "/home/rob/python/pyutil/src/calltrace.py", line 229, in _call\n    ret = self._func(*pargs, **kwargs)\n  File "/home/rob/python/pyutil/src/calltrace.py", line 427, in boom\n    raise TypeError(\'badaboom\')\nTypeError: badaboom\n')]
+        thread_id = id(threading.current_thread())
+        # FIXME: Make line nr and file location generic
+        expected = [self._mock.call('Thread{{{}}}:_TestClass[{}].boom(self={})'
+                                    .format(thread_id, id(tc), str(tc))),
+                    self._mock.call('Thread{{{}}}:_TestClass[{}].boom raised an exception'
+                                    .format(thread_id, id(tc))),
+                    self._mock.call('Traceback (most recent call last):\n  File "/home/rob/python/pyutil/src/calltrace.py", line 230, in _call\n    ret = self._func(*pargs, **kwargs)\n  File "/home/rob/python/pyutil/src/calltrace.py", line 458, in boom\n    raise TypeError(\'badaboom\')\nTypeError: badaboom\n')]
         self.assertListEqual(_output.mock_calls, expected)
 
     def test_masquerade(self):
@@ -464,8 +499,11 @@ class _TestCallTraceDecorator(unittest.TestCase):
         ret = _TestClass.test_method(1, 2, c=3)
         self.assertEqual(ret, 40)
 
-        expected = [self._mock.call('_TestClass.test_method(a=1, b=2, c=3)'),
-                    self._mock.call('_TestClass.test_method returned 40')]
+        thread_id = id(threading.current_thread())
+        expected = [self._mock.call('Thread{{{}}}:_TestClass.test_method(a=1, b=2, c=3)'
+                                    .format(thread_id)),
+                    self._mock.call('Thread{{{}}}:_TestClass.test_method returned 40'
+                                    .format(thread_id))]
         self.assertListEqual(_output.mock_calls, expected)
 
     def test_class_method(self):
@@ -478,8 +516,11 @@ class _TestCallTraceDecorator(unittest.TestCase):
         ret = _TestClass.test_method(1, 2, c=3)
         self.assertEqual(ret, 40)
 
-        expected = [self._mock.call('_TestClass.test_method(cls={}, a=1, b=2, c=3)'.format(str(_TestClass))),
-                    self._mock.call('_TestClass.test_method returned 40')]
+        thread_id = id(threading.current_thread())
+        expected = [self._mock.call('Thread{{{}}}:_TestClass.test_method(cls={}, a=1, b=2, c=3)'
+                                    .format(thread_id, str(_TestClass))),
+                    self._mock.call('Thread{{{}}}:_TestClass.test_method returned 40'
+                                    .format(thread_id))]
         self.assertListEqual(_output.mock_calls, expected)
 
     def test_sub_class(self):
@@ -517,16 +558,27 @@ class _TestCallTraceDecorator(unittest.TestCase):
         ret = sc.method_three(3, 1)
         self.assertEqual(ret, 4)
 
-        expected = [self._mock.call('_BaseClass[{}].method_one(self={}, a=1, b=2)'.format(id(bc), str(bc))),
-                    self._mock.call('_BaseClass[{}].method_one returned 3'.format(id(bc))),
-                    self._mock.call('_BaseClass[{}].method_two(self={}, c=4, d=5)'.format(id(bc), str(bc))),
-                    self._mock.call('_BaseClass[{}].method_two returned 9'.format(id(bc))),
-                    self._mock.call('_BaseClass[{}].method_one(self={}, a=1, b=2)'.format(id(sc), str(sc))),
-                    self._mock.call('_BaseClass[{}].method_one returned 3'.format(id(sc))),
-                    self._mock.call('_SubClass[{}].method_two(self={}, c=4, d=5)'.format(id(sc), str(sc))),
-                    self._mock.call('_SubClass[{}].method_two returned -1'.format(id(sc))),
-                    self._mock.call('_SubClass[{}].method_three(self={}, e=3, f=1)'.format(id(sc), str(sc))),
-                    self._mock.call('_SubClass[{}].method_three returned 4'.format(id(sc)))]
+        thread_id = id(threading.current_thread())
+        expected = [self._mock.call('Thread{{{}}}:_BaseClass[{}].method_one(self={}, a=1, b=2)'
+                                    .format(thread_id, id(bc), str(bc))),
+                    self._mock.call('Thread{{{}}}:_BaseClass[{}].method_one returned 3'
+                                    .format(thread_id, id(bc))),
+                    self._mock.call('Thread{{{}}}:_BaseClass[{}].method_two(self={}, c=4, d=5)'
+                                    .format(thread_id, id(bc), str(bc))),
+                    self._mock.call('Thread{{{}}}:_BaseClass[{}].method_two returned 9'
+                                    .format(thread_id, id(bc))),
+                    self._mock.call('Thread{{{}}}:_BaseClass[{}].method_one(self={}, a=1, b=2)'
+                                    .format(thread_id, id(sc), str(sc))),
+                    self._mock.call('Thread{{{}}}:_BaseClass[{}].method_one returned 3'
+                                    .format(thread_id, id(sc))),
+                    self._mock.call('Thread{{{}}}:_SubClass[{}].method_two(self={}, c=4, d=5)'
+                                    .format(thread_id, id(sc), str(sc))),
+                    self._mock.call('Thread{{{}}}:_SubClass[{}].method_two returned -1'
+                                    .format(thread_id, id(sc))),
+                    self._mock.call('Thread{{{}}}:_SubClass[{}].method_three(self={}, e=3, f=1)'
+                                    .format(thread_id, id(sc), str(sc))),
+                    self._mock.call('Thread{{{}}}:_SubClass[{}].method_three returned 4'
+                                    .format(thread_id, id(sc)))]
         self.assertListEqual(_output.mock_calls, expected)
 
 
