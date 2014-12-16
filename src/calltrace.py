@@ -462,12 +462,30 @@ class _TestCallTraceDecorator(unittest.TestCase):
             tc.boom()
 
         thread_id = id(threading.current_thread())
-        # FIXME: Make line nr and file location generic
+
+        class _RegexMatch(object):
+            def __init__(self, expected_regex):
+                self._expected = expected_regex
+
+            def __eq__(self, other):
+                import re
+                return re.match(self._expected, other) is not None
+
+            def __repr__(self):
+                return 'Regex: ' + repr(self._expected)
+
+        expected_traceback = _RegexMatch('Traceback \\(most recent call last\\):\n'
+                                         '  File ".*calltrace\\.py", line \\d+, in _call\n'
+                                         '    ret = self\\._func\\(\\*pargs, \\*\\*kwargs\\)\n'
+                                         '  File ".*calltrace\\.py", line \\d+, in boom\n'
+                                         '    raise TypeError\\(\'badaboom\'\\)\n'
+                                         'TypeError: badaboom\n')
+
         expected = [self._mock.call('Thread{{{}}}:_TestClass[{}].boom(self={})'
                                     .format(thread_id, id(tc), str(tc))),
                     self._mock.call('Thread{{{}}}:_TestClass[{}].boom raised an exception'
                                     .format(thread_id, id(tc))),
-                    self._mock.call('Traceback (most recent call last):\n  File "/home/rob/python/pyutil/src/calltrace.py", line 230, in _call\n    ret = self._func(*pargs, **kwargs)\n  File "/home/rob/python/pyutil/src/calltrace.py", line 458, in boom\n    raise TypeError(\'badaboom\')\nTypeError: badaboom\n')]
+                    self._mock.call(expected_traceback)]
         self.assertListEqual(_output.mock_calls, expected)
 
     def test_masquerade(self):
